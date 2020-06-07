@@ -1,0 +1,7 @@
+WHITESPACES = [b'\x00', b'\t', b'\f', b'\n', b'\r', b'\x20']
+DELIMS = [b'(', b')', b'<', b'>', b'[', b']', b'{', b'}', b'/', b'%']
+BRACKETS = [(b'(', b')'), (b'[', b']'), (b'{', b'}'), (b'<', b'>'), (b'<<', b'>>')]
+ESCAPES_STR = [b'n', b'r', b't', b'b', b'f', b'(', b')', b'\\']
+EOL = [b'\r', b'\n', b'\r\n']
+REGULARS = [bytes([x]) for x in range(256) if bytes([x]) not in WHITESPACES + DELIMS]
+NON_WHITESPACES = [bytes([x]) for x in range(256) if bytes([x]) not in WHITESPACES]
