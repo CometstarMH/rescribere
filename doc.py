@@ -44,24 +44,24 @@ class PdfDocument:
         filesize = os.fstat(f.fileno()).st_size
         print_progress()
 
-        self.body = []
-        self.xref_sections = []
-        self.trailers = []
+        self.increments = [{ 'body': [], 'xref_sections': [], 'trailers': [] }]
 
         # First line is header
-        s, _ = utils.read_until(f, syntax.EOL)
-        temp = re.match(rb'%PDF-(\d+\.\d+)', s)
-        if temp:
-            self.version = Decimal(temp.group(1).decode('iso-8859-1'))
+        s, eol_marker = utils.read_until(f, syntax.EOL)
+        header = re.match(rb'%PDF-(\d+\.\d+)', s)
+        if header:
+            self.version = Decimal(header.group(1).decode('iso-8859-1'))
+            f.seek(len(eol_marker), io.SEEK_CUR)
         else:
             raise Exception('Not a PDF file')
 
+        eof_found = False
         while True:
-            utils.seek_until(f, syntax.NON_WHITESPACES, ignore_comment=True)
+            utils.seek_until(f, syntax.NON_WHITESPACES, ignore_comment=False)
             if f.tell() >= filesize:
                 break
             org_pos = f.tell()
-            s, _ = utils.read_until(f, syntax.EOL)
+            s, eol_marker = utils.read_until(f, syntax.EOL)
             if s == b'startxref': # the last startxref always override the ones before
                 utils.seek_until(f, syntax.NON_WHITESPACES, ignore_comment=True)
                 t, _ = utils.read_until(f, syntax.EOL)
@@ -69,37 +69,55 @@ class PdfDocument:
                 continue
             elif s == b'xref':
                 f.seek(-4, io.SEEK_CUR)
-                self.xref_sections += [PdfXRefSection(f)]
-                print(f'now at {f.tell()}')
+                self.increments[-1]['xref_sections'] += [PdfXRefSection(f)]
                 continue
             elif s == b'trailer':
+                print('trailer found!')
                 utils.seek_until(f, syntax.NON_WHITESPACES, ignore_comment=True)
-                self.trailers += [PdfDictionaryObject.create_from_file(f, self)]
+                self.increments[-1]['trailers'] += [PdfDictionaryObject.create_from_file(f, self)]
+                continue
+            elif s == b'%%EOF': 
+                # since we are seeking until non-ws, the only case EOF marker 
+                # does not appear by itself it when it is preceded by some 
+                # whitespaces, which should be ignored
+                eof_found = True
+                f.seek(5 + len(eol_marker), io.SEEK_CUR)
+                continue
+            elif s[0:1] == b'%':
+                # otherwise, it is a comment, ignore the whole remaining line
+                utils.seek_until(f, syntax.EOL)
                 continue
             else:
                 f.seek(org_pos, io.SEEK_SET)
-            self.body += [PdfObject.create_from_file(f, self)]
+                if eof_found:
+                    self.increments += [{ 'body': [], 'xref_sections': [], 'trailers': [] }]
+                    eof_found = False
+            self.increments[-1]['body'] += [PdfObject.create_from_file(f, self)]
             print_progress()
         
         print('', end="\r")
         print('100% processed')
-        #print(self.body)
-        print(f'{self.body[-1]}')
         
 
     def __repr__(self):
         version_str = f'version={self.version}'
         startxref_str = f'startxref={self.startxref}'
+        result = f'PdfDocument(\n\t{version_str},\n\t{startxref_str},\n\t'
         body_repr = ''
-        for obj in self.body:
-            body_repr += repr(obj) + '\n\t\t'
-        return f'PdfDocument(\n\t{version_str},\n\t{startxref_str},\n\tbody=[\n\t\t{body_repr}\b])'
+        for increment in self.increments:
+            body_repr += 'body=[\n\t\t'
+            for obj in increment['body']:
+                body_repr += f'{repr(obj)},\n\t\t'
+            body_repr += f'\b],\n\ttrailer={increment["trailers"]},\n\t'
+        result += body_repr + ')'
+        return result
     
     def __str__(self):
         version_str = f'%PDF-{self.version}'
         body_repr = ''
-        for obj in self.body:
-            body_repr += str(obj) + '\n'
+        for increment in self.increments:
+            for obj in increment['body']:
+                body_repr += str(obj) + '\n'
         return f'{version_str}\n{body_repr}'
 
     
