@@ -35,7 +35,7 @@ def FlateDecode(dataBytes: Union[bytes, bytearray], params: PdfDictionaryObject)
 
     if params:
         try:
-            predictor = params.get('Predictor', Predictor.NoPrediction)
+            predictor = Predictor(params.get('Predictor', Predictor.NoPrediction).value)
         except AttributeError: # get not exist
             pass
     

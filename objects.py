@@ -251,7 +251,7 @@ class PdfNameObject(PdfNameObjectBase, PdfObject):
     
     The byte sequence of a name object should be interpreted as a UTF-8 sequence, after expanding # sequences (# followed by 2-digit hex)
     
-    This object stores the raw bytes as the primary value, as it is needed for equality checking. The interpreted string can be obtained by calling the getName() method"""
+    This object stores the raw bytes as the primary value, as it is needed for equality checking. The interpreted string can be obtained by calling the get_name() method"""
     __slots__ = []
     def __new__(cls, s):
         b = bytes()
@@ -486,8 +486,41 @@ class PdfStreamObject(PdfObject):
     def __init__(self, stream_dict: PdfDictionaryObject, raw_stream: bytes):
         self.dict = stream_dict
         self.raw_stream = raw_stream
-        # TODO: unfilter
+        self.decoded_stream = None
+    
+    def decode(self):
+        import decode
+        if self.decoded_stream is not None:
+            return self.decoded_stream
         
+        if self.dict.get('Filter') is None:
+            self.decoded_stream = self.raw_stream
+            return self.decoded_stream
+        
+        # /Filter array is just like matrix multiplication to ENCODE
+        # 1st filter is the last to be applied, and therefore 1st to be used for DECODE
+        filters = self.dict['Filter']
+        if isinstance(filters, PdfArrayObject):
+            filters = filters.value
+        if isinstance(filters, PdfNameObject):
+            filters = [filters]
+        # DecodeParms must be a single dict if there is only 1 filter
+        # or a array of dict/null
+        filters_params = self.dict['DecodeParms']
+        if isinstance(filters_params, PdfDictionaryObject):
+            filters_params = [filters_params]
+        if isinstance(filters_params, PdfArrayObject):
+            filters_params = filters_params.values
+        
+        self.decoded_stream = self.raw_stream
+        for i, filt in enumerate(filters): # filters is now list of PdfNameObject
+            decoder = getattr(decode, filt.get_name(), None)
+            if decoder is None:
+                raise Exception(f'Unrecognized decoder {filt.get_name()}')
+            self.decoded_stream = decoder(self.decoded_stream, filters_params[i])
+        
+        return self.decoded_stream
+    
     def write_to_file(self, f: io.BufferedReader):
         pass
 
@@ -520,8 +553,6 @@ class PdfStreamObject(PdfObject):
         filt = None
         if stream_dict.get('Filter') is not None:
             filt = stream_dict['Filter']
-            # /Filter array is just like matrix multiplication to ENCODE
-            # 1st filter is the last to be applied, and therefore 1st to be used for DECODE
             if isinstance(filt, PdfArrayObject):
                 if any(not isinstance(x, PdfNameObject) for x in filt.value):
                     raise Exception(f'Parse Error: Not a valid stream object at offset {org_pos}.')

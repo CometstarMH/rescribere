@@ -2,9 +2,9 @@ import utils
 import io
 import re
 import syntax
-import collections.abc
+from itertools import accumulate
 
-class PdfXRefSection(collections.abc.Sequence):
+class PdfXRefSection():
     def __init__(self, f):
         '''Initialize a PdfXRefSection from a opened PDF file f. 
         
@@ -27,15 +27,67 @@ class PdfXRefSection(collections.abc.Sequence):
                 self.subsections += [PdfXRefSubSection(f)]
             else:
                 break
-
     
-    def __getitem__(self, key):
-        pass
+    def get_obj_offset(self, obj_num, gen_num):
+        for sub in self.subsections:
+            sub_length = len(sub.entries)
+            if obj_num > sub.first_objno + sub_length - 1:
+                continue
+            else:
+                entry = sub.entries[obj_num - sub.first_objno]
+                if entry['used']:
+                    return entry['offset']
+                else:
+                    return 0
+        return None
+        
+    @classmethod
+    def from_xrefstm(cls, indirectStreamObj):
+        streamObj = indirectStreamObj.value
+        xref = streamObj.decode()
+        w = [int(v.value) for v in streamObj.dict['W'].value]
 
-    def __len__(self):
-        pass
+        if streamObj.dict.get('Index') is None:
+            index = [0, int(streamObj.dict.get('Size').value)]
+        else:
+            index = (int(i.value) for i in streamObj.dict['Index'].value)
+        index = list(utils.chunks(index, 2))
+        objnums = (e for subsection in (list(range(i[0], i[0] + i[1])) for i in index) for e in subsection)
+        ii = iter(i for i in range(0, len(xref), sum(w)))
 
-class PdfXRefSubSection(collections.abc.Sequence):
+        ss = []
+        for subsection in ((range(i[0], i[0] + i[1])) for i in index):
+            free_entry = []
+            inuse_entry = []
+            entries = []
+            for objnum in subsection:
+                i = next(ii)
+                fields = [int.from_bytes(xref[i+offset:i+offset+size], byteorder='big') for size, offset in zip(w, [0]+list(accumulate(w))[:-1])]
+                if fields[0] == 0: # free
+                    free_entry += [{'obj_no': objnum, 'gen_no': fields[2], 'used': False, 'compressed': False, 'next_free_obj_no': fields[1]}]
+                    entries += [free_entry[-1]]
+                elif fields[0] == 1: # used
+                    inuse_entry += [{'obj_no': objnum, 'gen_no': fields[2], 'used': True, 'compressed': False, 'offset': fields[1]}]
+                    entries += [inuse_entry[-1]]
+                elif fields[0] == 2: # compressed
+                    inuse_entry += [{'obj_no': objnum, 'gen_no': 0, 'used': True, 'compressed': True, 'stream_obj_no': fields[1], 'index': fields[2]}]
+                    entries += [inuse_entry[-1]]
+            ss += [PdfXRefSubSection.from_entries(inuse_entry, free_entry, entries)]
+
+        self = cls.__new__(cls)
+        self.subsections = ss
+        return self
+
+class PdfXRefSubSection():
+    @classmethod
+    def from_entries(cls, inuse_entry, free_entry, entries):
+        self = cls.__new__(cls)
+        self.inuse_entry = inuse_entry
+        self.free_entry = free_entry
+        self.entries = entries
+        return self
+
+
     def __init__(self, f):
         '''Initialize a PdfXRefSubSection from a opened PDF file f. 
 
@@ -44,6 +96,7 @@ class PdfXRefSubSection(collections.abc.Sequence):
         umber of entries, separated by a space'''
         self.inuse_entry = []
         self.free_entry = []
+        self.entries = []
         org_pos = f.tell()
         s, eol_marker = utils.read_until(f, syntax.EOL)
         matches = re.match(rb'^\s*(\d+)\s+(\d+)\s*$', s)
@@ -73,11 +126,13 @@ class PdfXRefSubSection(collections.abc.Sequence):
             # in-use entry: 1st 10-digit number is byte offset, free entry: 1st 10-digit number is an obj no of the next free object
             if matches.group(3) == b'n':
                 self.inuse_entry += [{'obj_no': current_obj_no, 'gen_no': int(matches.group(2)), 'used': True, 'offset': int(matches.group(1))}]
+                self.entries += [self.inuse_entry[-1]]
             elif matches.group(3) == b'f':
                 if (len(self.free_entry) > 0 and self.free_entry[-1]['next_free_obj_no'] != current_obj_no):
                     f.seek(org_pos, io.SEEK_SET)
                     raise Exception(f"cross-reference subsection contains an invalid entry at offset {f.tell() - 20}")
                 self.free_entry += [{'obj_no': current_obj_no, 'gen_no': int(matches.group(2)), 'used': False, 'next_free_obj_no': int(matches.group(1))}]
+                self.entries += [self.free_entry[-1]]
             else:
                 f.seek(org_pos, io.SEEK_SET)
                 raise Exception(f"cross-reference subsection contains an invalid entry at offset {f.tell() - 20}")
@@ -86,12 +141,6 @@ class PdfXRefSubSection(collections.abc.Sequence):
                 f.seek(org_pos, io.SEEK_SET)
                 raise Exception(f"cross-reference subsection contains an invalid entry at offset {f.tell() - 20}")
     
-    def __getitem__(self, key):
-        pass
-
-    def __len__(self):
-        pass
-
 
 
 

@@ -4,6 +4,20 @@ import syntax
 import math
 from typing import Union, Tuple, Iterable
 from functools import wraps
+from itertools import tee
+
+def pairwise(iterable):
+    '''s -> (s0,s1), (s1,s2), (s2, s3), ...'''
+    a, b = tee(iterable)
+    next(b, None)
+    return zip(a, b)
+
+# https://stackoverflow.com/a/1751478
+def chunks(l, n):
+    '''Split sequence l into chunks of size n. Last chunk can be of smaller size.'''
+    l = list(l)
+    n = max(1, n)
+    return (l[i:i+n] for i in range(0, len(l), n))
 
 # https://wiki.python.org/moin/PythonDecoratorLibrary#Memoize
 def memoize(obj):
