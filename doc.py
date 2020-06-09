@@ -55,10 +55,6 @@ class PdfDocument:
     
     def get_trailer(self, increment=-1):
         pass
-        # if self.offset_obj[self.startxref] is not None and self.offset_obj[self.startxref]['Type']='XRef':
-            
-        # else:
-        #     return self.increments[increment]['trailers'][-1]
 
     def get_catalog(self, increment=-1):
         return self.get_trailer(increment)['Root'].value # indirect ref
@@ -100,6 +96,7 @@ class PdfDocument:
 
         self.increments = [{ 'body': [], 'xref_sections': [], 'trailers': [] }]
         self.offset_obj = {}
+        self.compressed_obj = {}
 
         # First line is header
         s, eol_marker = utils.read_until(f, syntax.EOL)

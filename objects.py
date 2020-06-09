@@ -92,10 +92,8 @@ class PdfBooleanObject(PdfObject):
         org_pos = f.tell()
         token, _ = utils.read_until(f, syntax.DELIMS + syntax.WHITESPACES)
         if token == b'true':
-            f.seek(4, io.SEEK_CUR)
             return PdfBooleanObject(True)
         elif token == b'false':
-            f.seek(5, io.SEEK_CUR)
             return PdfBooleanObject(False)
         else:
             f.seek(org_pos, io.SEEK_SET)
@@ -474,6 +472,39 @@ class PdfIndirectObject(PdfObject):
                     f.seek(org_pos, io.SEEK_SET)
                     raise Exception(f'Parse Error: Not a valid indirect object at offset {org_pos}.')
                 inner_obj = streamObj
+                if streamObj.dict.get('Type') == 'ObjStm': # Object Stream, decode and parse the content
+                    objbytestream = io.BufferedReader(io.BytesIO(streamObj.decode()))
+                    # N pairs of integers 
+                    # 1st int is obj no of the compressed object 
+                    # 2nd int is byte offset of that object, relative to the first obj
+                    objbytestream.seek(0, io.SEEK_SET)
+                    utils.seek_until(objbytestream, syntax.NON_WHITESPACES, ignore_comment=True)
+                    numbers = []
+                    N = 0
+                    First = 0
+                    try:
+                        N = int(str(streamObj.dict['N'].value))
+                        First = int(str(streamObj.dict['First'].value))
+                        if N < 0 or First < 0:
+                            raise Exception(f'Invalid N or First field in ObjStm at offset {org_pos}.')
+                    except Exception as ex:
+                        raise Exception(f'Invalid N or First field in ObjStm at offset {org_pos}.') from ex
+                    for _ in range(2 * N):
+                        utils.seek_until(objbytestream, syntax.NON_WHITESPACES, ignore_comment=True)
+                        numobj = PdfNumericObject.create_from_file(objbytestream)
+                        try:
+                            temp = int(str(numobj.value))
+                            if temp < 0:
+                                raise Exception(f'Invalid obj no./offset in ObjStm at offset {org_pos}.')
+                            numbers += [temp]
+                        except Exception as ex:
+                            raise Exception(f'Invalid ObjStm at offset {org_pos}.') from ex
+                    for idx, p in enumerate(utils.chunks(numbers, 2)):
+                        # gen no, of object stream and of any compressed object is implicitly 0
+                        objbytestream.seek(First + p[1], io.SEEK_SET)
+                        doc.compressed_obj[obj_no,idx] = PdfIndirectObject(PdfObject.create_from_file(objbytestream, doc) , p[0], 0)
+                        # TODO: check for orphaned bytes between compressed objectes?
+                        
             else:
                 f.seek(org_pos, io.SEEK_SET)
                 raise Exception(f'Parse Error: Not a valid indirect object at offset {org_pos}.')
@@ -488,7 +519,7 @@ class PdfStreamObject(PdfObject):
         self.raw_stream = raw_stream
         self.decoded_stream = None
     
-    def decode(self):
+    def decode(self) -> bytes:
         import decode
         if self.decoded_stream is not None:
             return self.decoded_stream
@@ -506,7 +537,7 @@ class PdfStreamObject(PdfObject):
             filters = [filters]
         # DecodeParms must be a single dict if there is only 1 filter
         # or a array of dict/null
-        filters_params = self.dict['DecodeParms']
+        filters_params = self.dict.get('DecodeParms')
         if isinstance(filters_params, PdfDictionaryObject):
             filters_params = [filters_params]
         if isinstance(filters_params, PdfArrayObject):
@@ -517,7 +548,7 @@ class PdfStreamObject(PdfObject):
             decoder = getattr(decode, filt.get_name(), None)
             if decoder is None:
                 raise Exception(f'Unrecognized decoder {filt.get_name()}')
-            self.decoded_stream = decoder(self.decoded_stream, filters_params[i])
+            self.decoded_stream = decoder(self.decoded_stream, filters_params[i] if filters_params else None)
         
         return self.decoded_stream
     
