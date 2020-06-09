@@ -10,6 +10,25 @@ from decimal import Decimal
 from abc import abstractmethod, ABC
 from typing import List, Dict
 
+def val(pdfObj: PdfObject):
+    if isinstance(pdfObj, PdfBooleanObject) or isinstance(pdfObj, PdfNumericObject) or isinstance(pdfObj, PdfLiteralStringObject)or isinstance(pdfObj, PdfHexStringObject):
+        return pdfObj.value
+    if isinstance(pdfObj, PdfNameObject):
+        return pdfObj # TODO: reconsider?
+    if isinstance(pdfObj, PdfArrayObject):
+        return [val(obj) for obj in pdfObj.value]
+    if isinstance(pdfObj, PdfDictionaryObject):
+        return {k: val(pdfObj.value[k]) for k in pdfObj.value} # dict keys must be PdfNameObject
+    if isinstance(pdfObj, PdfIndirectObject):
+        return val(pdfObj.value) # TODO: reconsider?
+    if isinstance(pdfObj, PdfStreamObject):
+        return pdfObj.decode()
+    if isinstance(pdfObj, PdfReferenceObject):
+        return val(pdfObj.value)
+    if isinstance(pdfObj, PdfNullObject):
+        return None
+    
+
 # TODO: allow encryption
 
 # adapted from PyPDF2
