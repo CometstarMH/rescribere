@@ -36,6 +36,8 @@ class PdfXRefSection():
             else:
                 entry = sub.entries[obj_num - sub.first_objno]
                 if entry['used']:
+                    if entry['compressed']:
+                        return (entry['stream_obj_no'], entry['index'])
                     return entry['offset']
                 else:
                     return 0
@@ -85,6 +87,7 @@ class PdfXRefSubSection():
         self.inuse_entry = inuse_entry
         self.free_entry = free_entry
         self.entries = entries
+        self.first_objno = min(x['obj_no'] for x in entries)
         return self
 
 

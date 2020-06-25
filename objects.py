@@ -10,25 +10,6 @@ from decimal import Decimal
 from abc import abstractmethod, ABC
 from typing import List, Dict
 
-def val(pdfObj: PdfObject):
-    if isinstance(pdfObj, PdfBooleanObject) or isinstance(pdfObj, PdfNumericObject) or isinstance(pdfObj, PdfLiteralStringObject)or isinstance(pdfObj, PdfHexStringObject):
-        return pdfObj.value
-    if isinstance(pdfObj, PdfNameObject):
-        return pdfObj # TODO: reconsider?
-    if isinstance(pdfObj, PdfArrayObject):
-        return [val(obj) for obj in pdfObj.value]
-    if isinstance(pdfObj, PdfDictionaryObject):
-        return {k: val(pdfObj.value[k]) for k in pdfObj.value} # dict keys must be PdfNameObject
-    if isinstance(pdfObj, PdfIndirectObject):
-        return val(pdfObj.value) # TODO: reconsider?
-    if isinstance(pdfObj, PdfStreamObject):
-        return pdfObj.decode()
-    if isinstance(pdfObj, PdfReferenceObject):
-        return val(pdfObj.value)
-    if isinstance(pdfObj, PdfNullObject):
-        return None
-    
-
 # TODO: allow encryption
 
 # adapted from PyPDF2
@@ -491,38 +472,7 @@ class PdfIndirectObject(PdfObject):
                     f.seek(org_pos, io.SEEK_SET)
                     raise Exception(f'Parse Error: Not a valid indirect object at offset {org_pos}.')
                 inner_obj = streamObj
-                if streamObj.dict.get('Type') == 'ObjStm': # Object Stream, decode and parse the content
-                    objbytestream = io.BufferedReader(io.BytesIO(streamObj.decode()))
-                    # N pairs of integers 
-                    # 1st int is obj no of the compressed object 
-                    # 2nd int is byte offset of that object, relative to the first obj
-                    objbytestream.seek(0, io.SEEK_SET)
-                    utils.seek_until(objbytestream, syntax.NON_WHITESPACES, ignore_comment=True)
-                    numbers = []
-                    N = 0
-                    First = 0
-                    try:
-                        N = int(str(streamObj.dict['N'].value))
-                        First = int(str(streamObj.dict['First'].value))
-                        if N < 0 or First < 0:
-                            raise Exception(f'Invalid N or First field in ObjStm at offset {org_pos}.')
-                    except Exception as ex:
-                        raise Exception(f'Invalid N or First field in ObjStm at offset {org_pos}.') from ex
-                    for _ in range(2 * N):
-                        utils.seek_until(objbytestream, syntax.NON_WHITESPACES, ignore_comment=True)
-                        numobj = PdfNumericObject.create_from_file(objbytestream)
-                        try:
-                            temp = int(str(numobj.value))
-                            if temp < 0:
-                                raise Exception(f'Invalid obj no./offset in ObjStm at offset {org_pos}.')
-                            numbers += [temp]
-                        except Exception as ex:
-                            raise Exception(f'Invalid ObjStm at offset {org_pos}.') from ex
-                    for idx, p in enumerate(utils.chunks(numbers, 2)):
-                        # gen no, of object stream and of any compressed object is implicitly 0
-                        objbytestream.seek(First + p[1], io.SEEK_SET)
-                        doc.compressed_obj[obj_no,idx] = PdfIndirectObject(PdfObject.create_from_file(objbytestream, doc) , p[0], 0)
-                        # TODO: check for orphaned bytes between compressed objectes?
+                #if streamObj.dict.get('Type') == 'ObjStm': # Object Stream, decode and parse the content
                         
             else:
                 f.seek(org_pos, io.SEEK_SET)
@@ -549,6 +499,7 @@ class PdfStreamObject(PdfObject):
         
         # /Filter array is just like matrix multiplication to ENCODE
         # 1st filter is the last to be applied, and therefore 1st to be used for DECODE
+        # TODO: Remove the assumption that Filter value is always a direct obj
         filters = self.dict['Filter']
         if isinstance(filters, PdfArrayObject):
             filters = filters.value
@@ -594,6 +545,7 @@ class PdfStreamObject(PdfObject):
         if stream_dict.get('Length') is None or not isinstance(stream_dict.get('Length'), PdfNumericObject):
             raise Exception(f'Parse Error: Not a valid stream object at offset {org_pos}.')
         
+        # TODO: Remove the assumption that Length value is always a direct obj
         size = stream_dict['Length'].value
         if size.as_integer_ratio()[0] <= 0 or size.as_integer_ratio()[1] != 1:
             raise Exception(f'Parse Error: Not a valid stream object at offset {org_pos}.')
@@ -602,6 +554,7 @@ class PdfStreamObject(PdfObject):
         # check for filters
         filt = None
         if stream_dict.get('Filter') is not None:
+            # TODO: Remove the assumption that Filter value is always a direct obj
             filt = stream_dict['Filter']
             if isinstance(filt, PdfArrayObject):
                 if any(not isinstance(x, PdfNameObject) for x in filt.value):
@@ -698,3 +651,21 @@ class PdfNullObject(PdfObject):
             raise Exception(f'Parse Error: Not a valid null object at offset {org_pos}.')
         return PdfNullObject()
 
+
+def val(pdfObj: PdfObject):
+    if isinstance(pdfObj, PdfBooleanObject) or isinstance(pdfObj, PdfNumericObject) or isinstance(pdfObj, PdfLiteralStringObject)or isinstance(pdfObj, PdfHexStringObject):
+        return pdfObj.value
+    if isinstance(pdfObj, PdfNameObject):
+        return pdfObj # TODO: reconsider?
+    if isinstance(pdfObj, PdfArrayObject):
+        return [val(obj) for obj in pdfObj.value]
+    if isinstance(pdfObj, PdfDictionaryObject):
+        return {k: val(pdfObj.value[k]) for k in pdfObj.value} # dict keys must be PdfNameObject
+    if isinstance(pdfObj, PdfIndirectObject):
+        return val(pdfObj.value) # TODO: reconsider?
+    if isinstance(pdfObj, PdfStreamObject):
+        return pdfObj.decode()
+    if isinstance(pdfObj, PdfReferenceObject):
+        return val(pdfObj.value)
+    if isinstance(pdfObj, PdfNullObject):
+        return None

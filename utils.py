@@ -4,7 +4,7 @@ import syntax
 import math
 from typing import Union, Tuple, Iterable
 from functools import wraps
-from itertools import tee
+from itertools import tee, islice
 
 def pairwise(iterable):
     '''s -> (s0,s1), (s1,s2), (s2, s3), ...'''
@@ -13,11 +13,25 @@ def pairwise(iterable):
     return zip(a, b)
 
 # https://stackoverflow.com/a/1751478
-def chunks(l, n):
-    '''Split sequence l into chunks of size n. Last chunk can be of smaller size.'''
+def chunks_(l, n):
+    '''Split sequence l into chunks of size n. Last chunk can be of smaller size. Depends on len of l being known.'''
     l = list(l)
     n = max(1, n)
     return (l[i:i+n] for i in range(0, len(l), n))
+
+def chunks(l, n):
+    '''Split sequence l into chunks of size n. Last chunk can be of smaller size.'''
+    x = [None] * n # This seems to be optimized by at least CPython https://stackoverflow.com/a/7733316/2157240
+    i = 0
+    for e in l:
+        if i >= n:
+            yield x
+            x = [None] * n
+            i = 0
+        x[i] = e
+        i += 1
+    x = x[0:i]
+    yield x
 
 # https://wiki.python.org/moin/PythonDecoratorLibrary#Memoize
 def memoize(obj):
@@ -102,6 +116,70 @@ def seek_until(f: io.BufferedReader, patterns: Iterable, *, ignore_comment: bool
         return seek_until(f, patterns, ignore_comment=ignore_comment)
     else:
         return f.tell()
+
+def tail(f, lines):
+    BLOCK_SIZE = 1024
+    f.seek(0, io.SEEK_END)
+    block_end_byte = f.tell()
+    lines_to_go = lines + 1 # read 1 extra line, which can be partial if the block boundary lies in the middle of the line
+    block_number = -1
+    blocks = [] # blocks of size BLOCK_SIZE, in reverse order starting
+                # from the end of the file
+    while lines_to_go > 0 and block_end_byte > 0:
+        if (block_end_byte > BLOCK_SIZE):
+            # read the last block we haven't yet read
+            f.seek(block_number*BLOCK_SIZE, io.SEEK_END)
+            blocks.append(f.read(BLOCK_SIZE))
+        else:
+            # file too small, start from begining
+            f.seek(0, io.SEEK_SET)
+            # only read what was not read
+            blocks.append(f.read(block_end_byte))
+        lines_found = len(re.findall(rb'\r\n|\r(?!\n)|(?<!\r)\n', blocks[-1])) ## Changed in version 3.7: Non-empty matches can now start just after a previous empty match.
+        lines_to_go -= lines_found
+        block_end_byte -= BLOCK_SIZE
+        block_number -= 1
+    all_read_text = b''.join(reversed(blocks)) # this includes the characters after the last EOL
+    return re.split(rb'\r\n|\r(?!\n)|(?<!\r)\n', all_read_text)[-lines:]
+
+
+def rlines(f, BLOCK_SIZE = 1024, *, MAX_OFFSET = None):
+    f.seek(0, io.SEEK_END)
+    block_end_byte = f.tell()
+    block_number = -1
+    blocks = []
+    if MAX_OFFSET is not None:
+        if MAX_OFFSET < 0: MAX_OFFSET = block_end_byte + MAX_OFFSET
+        if MAX_OFFSET >= block_end_byte: MAX_OFFSET = block_end_byte - 1
+    else:
+        MAX_OFFSET = block_end_byte
+    while block_end_byte > 0:
+        if (block_end_byte > BLOCK_SIZE):
+            # read the last block we haven't yet read
+            f.seek(MAX_OFFSET + 1 + block_number*BLOCK_SIZE, io.SEEK_SET)
+            #f.seek(block_number*BLOCK_SIZE, io.SEEK_END)
+            blocks.append(f.read(BLOCK_SIZE))
+        else:
+            # file too small, start from begining
+            f.seek(0, io.SEEK_SET)
+            # only read what was not read
+            blocks.append(f.read(block_end_byte))
+        block_end_byte -= BLOCK_SIZE
+        block_number -= 1
+        # this includes the characters after the last EOL
+        all_read_text = b''.join(reversed(blocks)) 
+        # yield all lines except the last line, which may be partial
+        temp = re.split(rb'(\r\n|\r(?!\n)|(?<!\r)\n)', all_read_text)
+        # re.split always output odd nunber of elements when there is exactly 1 capture group in the delim
+        # the last element is the remainder of unsplit text, which can be empty
+        if temp[-1] == b'': temp = temp[:-1] 
+        yield from reversed(list(islice((b''.join(x) for x in chunks(temp, 2)), 1, None)))
+        # save the remaining characters
+        temp = re.split(rb'(\r\n|\r(?!\n)|(?<!\r)\n)', all_read_text, 1) # max len = 3
+        blocks = [b''.join(temp[0:2])] if len(temp) > 1 else [temp]
+        if len(blocks[-1]) == 0:
+            blocks = []
+    if len(blocks) > 0: yield blocks[0] 
 
 @memoize
 def b_(sth) -> bytes:
