@@ -141,11 +141,12 @@ class PdfDocument:
                 raise Exception('invalid Pages dictionary')
         return None
     
-    def __init__(self, f):
+    def __init__(self, f, progress_cb: None):
         '''Initialize a PdfDocument from a opened PDF file f from the beginning'''
         def print_progress():
             print('', end="\r")
             print(f'{f.tell() / filesize * 100:5.2f}% processed', end='', flush=True)
+            if progress_cb is not None: progress_cb(f'{f.tell() / filesize * 100:5.2f}% processed', read=f.tell(), total=filesize)
 
         f.seek(0, io.SEEK_SET)
         filesize = os.fstat(f.fileno()).st_size
@@ -280,13 +281,16 @@ class PdfDocument:
         
         print('', end="\r")
         print('100% processed')
+        if progress_cb is not None: progress_cb('100% processed')
         self.ready = True
 
         print('Decoding object streams...')
+        if progress_cb is not None: progress_cb('Decoding object streams...')
         for k in self.offset_obj_streams:
             from objstm import decode_objstm
             self.compressed_obj = { **(self.compressed_obj), **(decode_objstm(self.offset_obj_streams[k], self)) }
         print('Done')
+        if progress_cb is not None: progress_cb('Done')
 
         
         
