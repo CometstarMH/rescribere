@@ -420,7 +420,7 @@ class PdfIndirectObject(PdfObject):
         f.write(b'endobj')
         
     def __repr__(self):
-        return f'PdfIndirectObject(obj_no={self.obj_no}, gen_no={self.gen_no}, value={repr(self.value)})'
+        return f'PdfIndirectObject(obj_no={self.obj_no}, gen_no={self.gen_no})'
     
     def __str__(self):
         return f'{self.obj_no} {self.gen_no} obj {str(self.value)} endobj'
