@@ -281,16 +281,16 @@ class PdfDocument:
         
         print('', end="\r")
         print('100% processed')
-        if progress_cb is not None: progress_cb('100% processed')
+        if progress_cb is not None: progress_cb('100% processed', read=f.tell(), total=filesize)
         self.ready = True
 
         print('Decoding object streams...')
-        if progress_cb is not None: progress_cb('Decoding object streams...')
+        if progress_cb is not None: progress_cb('Decoding object streams...', read=f.tell(), total=filesize)
         for k in self.offset_obj_streams:
             from objstm import decode_objstm
             self.compressed_obj = { **(self.compressed_obj), **(decode_objstm(self.offset_obj_streams[k], self)) }
         print('Done')
-        if progress_cb is not None: progress_cb('Done')
+        if progress_cb is not None: progress_cb('Done', read=f.tell(), total=filesize)
 
         
         
