@@ -13,7 +13,7 @@ class PdfDocument:
     def startxref(self):
         '''Get or set the byte offset from the beginning of the file to the beginning of the 'xref' keyword in the last, i.e. the most current, cross-reference section.'''
         return self.__startxref__
-    
+
     @startxref.setter
     def startxref(self, value):
         if not isinstance(value, int) or value < 0:
@@ -23,7 +23,7 @@ class PdfDocument:
 
     @property
     def version(self):
-        '''Get or set the version of the PDF specification to which this file conforms. 
+        '''Get or set the version of the PDF specification to which this file conforms.
 
         Beginning with PDF 1.4, this value can be overridden by the Version entry in the document's catalog dictionary'''
         return self.__version__
@@ -34,7 +34,7 @@ class PdfDocument:
             raise ValueError('Version must be a Decimal')
         else:
             self.__version__ = value
-    
+
     def get_obj(self, obj_num, gen_num):
         if not self.ready:
             raise Exception('get_obj can only be called after the document is scanned completely.')
@@ -42,12 +42,33 @@ class PdfDocument:
         startxref = -1
         for increment in range(len(self.increments)):
             increment = -(increment + 1) # increment from -1 to -len
-            section = None
-            startxref = self.increments[increment]['startxref']
-            # skip increment if it is not ended by %%EOF
-            if self.increments[increment]['eof']:
-                startxref_found = True
-                break
+            xref_section = self.increments[increment]['xref_section']
+
+            offset = xref_section.get_obj_offset(obj_num, gen_num)
+            if isinstance(offset, tuple):
+                return self.compressed_obj[offset]
+            if offset > 0:
+                return self.offset_obj[offset]
+            elif offset == 0:
+                # offset = 0 <=> obj_num is free at gen_num
+                return None
+            else:
+                # offset is None <=> obj_num not found
+                continue
+                # trailer_dict = get_trailer_dict(increment)
+                # startxref = trailer_dict.get('Prev')
+                # # TODO: assuming Prev has direct object value
+                # if startxref is not None and isinstance(startxref, PdfNumericObject):
+                #     # TODO: converting from decimal directly to int
+                #     startxref = int(startxref.value)
+                # else:
+                #     break
+                # if startxref < 0:
+                #     break
+
+        raise Exception('Object not found')
+
+
         if not startxref_found or startxref < 0:
             raise Exception('No valid startxref is found')
         while True:
@@ -62,14 +83,14 @@ class PdfDocument:
                         raise Exception('')
                 except Exception as ex:
                     raise Exception('startxref refers to an object, but it is not a XRef stream') from ex
-                # XRef streams are stream objects, which is indirect 
+                # XRef streams are stream objects, which is indirect
                 xrefstm: PdfStreamObject = self.offset_obj[startxref]
                 section = PdfXRefSection.from_xrefstm(xrefstm)
                 # Cache the decoded xrefstm
                 self.offset_xref[self.increments[increment]['startxref']] = section
             else:
                 section = self.offset_xref[startxref]
-            
+
             offset = section.get_obj_offset(obj_num, gen_num)
             if isinstance(offset, tuple):
                 return self.compressed_obj[offset]
@@ -91,28 +112,31 @@ class PdfDocument:
                 if startxref < 0:
                     break
         raise Exception('Object not found')
-    
+
     def get_trailer_dict(self, increment=-1):
         if not self.ready:
             raise Exception('get_trailer_dict can only be called after the document is scanned completely.')
-        
-        isXRefStm = False
-        startxref = self.increments[increment]['startxref']
-        try:
-            # TODO: assuming Type has direct obj value
-            isXRefStm = self.offset_obj[startxref].value.dict['Type'] == 'XRef'
-        except Exception as ex:
-            raise Exception('startxref refers to an object, but it is not a XRef stream') from ex
-        if isXRefStm:
-            # The trailer dictionary entries are stored in the stream dictionary
-            return self.offset_obj[startxref].value.dict
-        else:
-            return self.increments[increment]['trailers']
+        return self.increments[increment]['trailer']
+
+        # isXRefStm = False
+        # startxref = self.increments[increment]['startxref']
+        # try:
+        #     # TODO: assuming Type has direct obj value
+        #     isXRefStm = self.offset_obj[startxref].value.dict['Type'] == 'XRef'
+        # except Exception as ex:
+        #     raise Exception('startxref refers to an object, but it is not a XRef stream') from ex
+        # if isXRefStm:
+        #     # The trailer dictionary entries are stored in the stream dictionary
+        #     return self.offset_obj[startxref].value.dict
+        # else:
+        #     if self.increments[increment]['trailer'] is None:
+        #         raise Exception('No trailer is found is increment ' + str(increment))
+        #     return self.increments[increment]['trailer']
 
     def get_catalog(self, increment=-1):
         if not self.ready:
             raise Exception('get_catalog can only be called after the document is scanned completely.')
-        return self.get_trailer_dict(increment)['Root'].value # indirect ref
+        return self.get_trailer_dict(increment)['Root'].deref() # Root value must be indirect ref
 
     def get_page_dict(self, pageIndex, increment=-1):
         if not self.ready:
@@ -120,14 +144,14 @@ class PdfDocument:
         current_page = 0
         cat = self.get_catalog(increment)
         queue = []
-        queue.append(cat['Pages'].value) # category dict.Pages is indirect ref
+        queue.append(cat['Pages'].deref())
         while len(queue) > 0:
             visit = queue.pop()
             if visit['Type'] == 'Pages':
                 if current_page + visit['Count'] > pageIndex:
                     for x in reversed(visit['Kids'].value):
                         # Kids is array of indrect ref
-                        queue.append(x.value if isinstance(x, PdfReferenceObject) else x)
+                        queue.append(x.deref() if isinstance(x, PdfReferenceObject) else x)
                     continue
                 else:
                     current_page += visit['Count']
@@ -140,8 +164,171 @@ class PdfDocument:
             else:
                 raise Exception('invalid Pages dictionary')
         return None
-    
-    def __init__(self, f, progress_cb: None):
+
+    def get_all_page_dicts(self):
+        if not self.ready:
+            raise Exception('get_all_page_dict can only be called after the document is scanned completely.')
+        current_page = 0
+        cat = self.get_catalog().value
+        pages = []
+        queue = []
+        queue.append(cat['Pages'].deref()) # category_dict.Pages must be indirect ref
+        while len(queue) > 0:
+            visit = queue.pop()
+            if visit['Type'] == 'Pages':
+                for x in reversed(visit['Kids'].value): # Kids value is an array of indirect ref => x is indirect ref
+                    queue.append(x.deref() if isinstance(x, PdfReferenceObject) else x)
+            elif visit['Type'] == 'Page':
+                pages.append(visit)
+                current_page += 1
+                continue
+            else:
+                raise Exception('invalid Pages dictionary')
+        return pages
+
+    def __init__(self, f, progress_cb):
+        self.increments = [{ 'body': [], 'xref_section': None, 'trailer': None, 'startxref': None, 'eof': False }]
+        self.offset_obj = {} # [offset]: obj
+        self.compressed_obj = {} # [objstmobj_no, idx]: decompressed_obj
+        self.startxref = 0
+        self.offset_obj_streams = {} # [offset]: objstm
+        self.offset_xref = {}
+        self.ready = False
+        self.offset_xref_trailer = {} # [offset]: (PdfXRefSection, trailer_dict)
+
+        self.parse_normal(f, progress_cb)
+
+    def get_xref_trailer_at_offset(self, f, offset):
+        # read xref, trailer should directly follow, and MUST be read TOGETHER with xref
+        # linearized PDF specified the last appering trailer DOES NOT have Prev entry, and startxref points to 1st page xref table near start of file
+        # which has its own trailer, making the last trailer technically the 'first' trailer
+        # therefore, searching for trailer dict from end of file would get the wrong trailer dict
+        # moreover, in a xref stream, the xref and trailer dict is lumped together as the stream object
+        if offset in self.offset_xref_trailer:
+            return self.offset_xref_trailer[offset]
+        f.seek(offset, io.SEEK_SET)
+        temp, _ = utils.read_until(f, syntax.EOL)
+        f.seek(offset, io.SEEK_SET)
+        # TODO: catch exception for parsing PdfXRefSection
+        if temp == b'xref':
+            # uncompressed xref section
+            utils.seek_until(f, syntax.NON_WHITESPACES, ignore_comment=True)
+            xref_section = PdfXRefSection(f)
+            # find trailer dict and Prev
+            # trailer dict CAN contain references
+            utils.seek_until(f, syntax.NON_WHITESPACES, ignore_comment=True)
+            temp, _ = utils.read_until(f, syntax.EOL)
+            if temp == b'trailer':
+                utils.seek_until(f, syntax.NON_WHITESPACES, ignore_comment=True)
+                trailer_dict = PdfDictionaryObject.create_from_file(f, self)
+                self.offset_xref_trailer[offset] = (xref_section, trailer_dict)
+            else:
+                # TODO: check for objects between xref and trailer dict, and between trailer dict and startxref?
+                raise Exception(f'trailer dict not found after xref table at {f.tell() - 7}')
+        else:
+            # may be compressed xref stream
+            # trailer dict IS the stream dict, and CANNOT contain references
+            try:
+                xref_stream = PdfIndirectObject.create_from_file(f, self)
+            except Exception as ex:
+                raise Exception('Invalid xref stream') from ex
+            xref_section = PdfXRefSection.from_xrefstm(xref_stream)
+            self.offset_xref_trailer[offset] = (xref_section, xref_stream.value.dict)
+
+        return self.offset_xref_trailer[offset]
+
+    def parse_normal(self, f, progress_cb=None):
+        '''Initialize a PdfDocument from a opened PDF file f by reading xref and trailers. After this is called, offset_obj, offset_obj_streams, compressed_obj, offset_xref_trailer, all xref sections are ready'''
+        f.seek(0, io.SEEK_SET)
+        filesize = os.fstat(f.fileno()).st_size
+        # First line is header
+        s, eol_marker = utils.read_until(f, syntax.EOL)
+        header = re.match(rb'%PDF-(\d+\.\d+)', s)
+        if header:
+            self.version = Decimal(header.group(1).decode('iso-8859-1'))
+            f.seek(len(eol_marker), io.SEEK_CUR)
+        else:
+            raise Exception('Not a PDF file')
+
+        # read from end of file, find xref
+        eof_found = -1
+        startxref_found = -1
+        temp_line = b''
+        temp_count = 2
+        temp_offset = 0
+        for line in utils.rlines(f):
+            temp_offset -= len(line)
+            if line.rstrip() == b'%%EOF':
+                eof_found = temp_offset
+            if eof_found != -1 and temp_count == 0:
+                if line.rstrip() == b'startxref':
+                    startxref_found = temp_offset
+                    break
+                else:
+                    raise Exception('startxref not found at 2 lines before EOF marker')
+            elif eof_found != -1:
+                temp_count -= 1
+                temp_line = line
+        xref_offset = int(temp_line.decode('iso-8859-1'))
+        self.startxref = xref_offset
+        # The only required part for a trailer (and marks the end of an increment) is startxref and %%EOF
+        self.increments[-1]['startxref'] = xref_offset
+        self.increments[-1]['eof'] = True
+
+        inuse_count = 0
+        while True:
+            f.seek(xref_offset, io.SEEK_SET)
+            xref_section, trailer = self.get_xref_trailer_at_offset(f, xref_offset)
+            self.offset_xref_trailer[xref_offset] = (xref_section, trailer)
+            for subsec in xref_section.subsections:
+                inuse_count += len(subsec.inuse_entry)
+            self.increments[0]['xref_section'] = xref_section
+            self.increments[0]['trailer'] = trailer
+            if trailer.get('Prev') is None:
+                break
+            if trailer['Prev'].value - int(trailer['Prev'].value) != 0:
+                raise Exception(f'Prev must be an integer, in trailer dict at offset {xref_offset}')
+            xref_offset = int(trailer['Prev'].value) # must not be indirect
+            self.increments = [{ 'body': [], 'xref_section': None, 'trailer': None, 'startxref': None, 'eof': False }] + self.increments
+            self.increments[0]['startxref'] = xref_offset
+
+        inuse_parsed_count = 0
+        # parse each in use obj num
+        for inc in self.increments:
+            for subsec in inc['xref_section'].subsections:
+                for entry in subsec.inuse_entry:
+                    if entry.get('compressed'):
+                        inuse_parsed_count += 1
+                        continue
+                    offset = entry['offset']
+                    f.seek(offset, io.SEEK_SET)
+                    new_obj = PdfObject.create_from_file(f, self)
+                    if not isinstance(new_obj, PdfIndirectObject) or new_obj.obj_no != entry['obj_no'] or new_obj.gen_no != entry['gen_no']:
+                        raise Exception(f'Invalid obj referenced by xref at offset {offset}')
+                    self.offset_obj[offset] = new_obj
+                    if isinstance(new_obj.value, PdfStreamObject) and new_obj.value.dict.get('Type') == 'ObjStm':
+                        self.offset_obj_streams[offset] = new_obj
+                    inuse_parsed_count += 1
+                    print('', end="\r")
+                    print(f'{inuse_parsed_count / inuse_count * 100:5.2f}% processed', end='', flush=True)
+                    if progress_cb is not None: progress_cb(f'{inuse_parsed_count / inuse_count * 100:5.2f}% processed', read=inuse_parsed_count, total=inuse_count)
+
+        print('Decoding object streams...')
+        if progress_cb is not None: progress_cb('Decoding object streams...', read=inuse_parsed_count, total=inuse_count)
+        for k in self.offset_obj_streams:
+            from objstm import decode_objstm
+            self.compressed_obj = { **(self.compressed_obj), **(decode_objstm(self.offset_obj_streams[k], self)) }
+        print('', end="\r")
+        print('100% processed    ')
+        if progress_cb is not None: progress_cb('100% processed', read=inuse_parsed_count, total=inuse_count)
+        print('Done')
+        if progress_cb is not None: progress_cb('Done', read=inuse_parsed_count, total=inuse_count)
+        self.ready = True
+
+
+
+
+    def parse_linear(self, f, progress_cb=None):
         '''Initialize a PdfDocument from a opened PDF file f from the beginning'''
         def print_progress():
             print('', end="\r")
@@ -150,76 +337,6 @@ class PdfDocument:
 
         f.seek(0, io.SEEK_SET)
         filesize = os.fstat(f.fileno()).st_size
-
-        self.increments = [{ 'body': [], 'xref_sections': {}, 'trailers': None, 'startxref': None, 'eof': False }]
-        self.offset_obj = {}
-        self.compressed_obj = {}
-        self.startxref = 0
-        self.offset_obj_streams = {}
-        self.offset_xref = {}
-        self.ready = False
-
-        # print('Parsing xref sections...')
-        # # read backward first, find xref sections and trailers
-        # max_offset = None
-
-        # eof_found = -1
-        # startxref_found = -1
-        # temp_line = b''
-        # temp_count = 2
-        # temp_offset = 0
-        # for i, line in utils.rlines(f, MAX_OFFSET=max_offset):
-        #     temp_offset -= len(line)
-        #     if line.rstrip() == b'%%EOF':
-        #         eof_found = temp_offset
-        #     if eof_found != -1 and temp_count == 0:
-        #         if line.rstrip() == b'startxref':
-        #             startxref_found = temp_offset
-        #             break
-        #         else:
-        #             raise Exception('startxref not found at 2 lines before EOF marker')
-        #     elif eof_found != -1:
-        #         temp_count -= 1
-        #         temp_line = line
-        # xref_offset = int(temp_line.decode('iso-8859-1'))
-        # # The only require part for a trailer (and marks the end of an increment) is startxref and %%EOF
-        # self.increments = [{ 'body': [], 'xref_sections': [], 'trailers': None }] + self.increments
-
-        # f.seek(xref_offset, io.SEEK_SET)
-        # xref_section = None
-        # need_trailer_dict = False
-        # xref_stream = None
-        # # TODO: catch exception for parsing PdfXRefSection
-        # if utils.read_until(f, syntax.EOL) == b'xref':
-        #     # uncompressed xref section
-        #     f.seek(xref_offset, io.SEEK_SET)
-        #     self.increments[0]['xref_sections'] += [PdfXRefSection(f)]
-        #     # find trailer dict and Prev
-        #     # immediately preceding startxref line is trailer dict, consisting of the keyword trailer followed by a dict object
-        #     # trailer dict CAN contain references
-        #     trailer_lines = []
-        #     for line in utils.rlines(f, MAX_OFFSET=startxref_found - 1):
-        #         if line.rstrip() != b'trailer':
-        #             trailer_lines.append(line)
-        #         else:
-        #             break
-        #     trailer_dict = PdfDictionaryObject.create_from_file(io.BufferedReader(io.BytesIO(b''.join(reversed(trailer_lines)))), self)
-        #     # TODO: check for objects between xref and trailer dict, and between trailer dict and startxref?
-        #     self.increments[0]['trailers'] = trailer_dict
-        # else:
-        #     # may be compressed xref stream
-        #     # trailer dict IS the stream dict, and CANNOT contain references
-        #     f.seek(xref_offset, io.SEEK_SET)
-        #     try:
-        #         xref_stream = PdfIndirectObject.create_from_file(f, self)
-        #     except Exception as ex:
-        #         raise Exception('Invalid xref stream') from ex
-        #     self.offset_obj[org_pos] = new_obj
-        #     xref_section = PdfXRefSection.from_xrefstm(xref_stream)
-        #     self.increments[0]['xref_sections'] += [xref_section]
-        #     self.increments[0]['trailers'] = xref_stream.value.dict
-        
-        # # find prev %%EOF
 
         print_progress()
 
@@ -246,17 +363,17 @@ class PdfDocument:
                 continue
             elif s == b'xref':
                 f.seek(-4, io.SEEK_CUR)
-                self.increments[-1]['xref_sections'][org_pos] = PdfXRefSection(f)
-                self.offset_xref[org_pos] = self.increments[-1]['xref_sections'][org_pos]
+                self.increments[-1]['xref_section'] = PdfXRefSection(f)
+                self.offset_xref[org_pos] = self.increments[-1]['xref_section']
                 continue
             elif s == b'trailer':
                 utils.seek_until(f, syntax.NON_WHITESPACES, ignore_comment=True)
-                self.increments[-1]['trailers'] = PdfDictionaryObject.create_from_file(f, self)
+                self.increments[-1]['trailer'] = PdfDictionaryObject.create_from_file(f, self)
                 continue
-            elif s == b'%%EOF': 
+            elif s == b'%%EOF':
                 # TODO: check if trailer dict immediately precedes %%EOF
-                # since we are seeking until non-ws, the only case EOF marker 
-                # does not appear by itself it when it is preceded by some 
+                # since we are seeking until non-ws, the only case EOF marker
+                # does not appear by itself it when it is preceded by some
                 # whitespaces, which should be ignored
                 self.increments[-1]['eof'] = True
                 f.seek(5 + len(eol_marker), io.SEEK_CUR)
@@ -269,8 +386,8 @@ class PdfDocument:
 
             f.seek(org_pos, io.SEEK_SET)
             if self.increments[-1]['eof']:
-                self.increments += [{ 'body': [], 'xref_sections': [], 'trailers': None, 'startxref': None, 'eof': False }]
-            
+                self.increments += [{ 'body': [], 'xref_section': None, 'trailer': None, 'startxref': None, 'eof': False }]
+
             # TODO: how to handle object parse error?
             new_obj = PdfObject.create_from_file(f, self)
             self.increments[-1]['body'] += [new_obj]
@@ -278,9 +395,9 @@ class PdfDocument:
             if isinstance(new_obj.value, PdfStreamObject) and new_obj.value.dict.get('Type') == 'ObjStm':
                 self.offset_obj_streams[org_pos] = new_obj
             print_progress()
-        
+
         print('', end="\r")
-        print('100% processed')
+        print('100% processed    ')
         if progress_cb is not None: progress_cb('100% processed', read=f.tell(), total=filesize)
         self.ready = True
 
@@ -292,8 +409,8 @@ class PdfDocument:
         print('Done')
         if progress_cb is not None: progress_cb('Done', read=f.tell(), total=filesize)
 
-        
-        
+
+
 
     def __repr__(self):
         version_str = f'version={self.version}'
@@ -307,7 +424,7 @@ class PdfDocument:
             body_repr += f'\b],\n\ttrailer={increment["trailers"]},\n\t'
         result += body_repr + ')'
         return result
-    
+
     def __str__(self):
         version_str = f'%PDF-{self.version}'
         body_repr = ''
@@ -316,5 +433,5 @@ class PdfDocument:
                 body_repr += str(obj) + '\n'
         return f'{version_str}\n{body_repr}'
 
-    
+
 

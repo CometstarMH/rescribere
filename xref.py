@@ -6,9 +6,9 @@ from itertools import accumulate
 
 class PdfXRefSection():
     def __init__(self, f):
-        '''Initialize a PdfXRefSection from a opened PDF file f. 
-        
-        The file object’s current position should be at the beginning of the 
+        '''Initialize a PdfXRefSection from a opened PDF file f.
+
+        The file object’s current position should be at the beginning of the
         line with the sole keyword 'xref' '''
         self.subsections = []
         org_pos = f.tell()
@@ -27,7 +27,7 @@ class PdfXRefSection():
                 self.subsections += [PdfXRefSubSection(f)]
             else:
                 break
-    
+
     def get_obj_offset(self, obj_num, gen_num):
         for sub in self.subsections:
             sub_length = len(sub.entries)
@@ -36,13 +36,13 @@ class PdfXRefSection():
             else:
                 entry = sub.entries[obj_num - sub.first_objno]
                 if entry['used']:
-                    if entry['compressed']:
+                    if entry.get('compressed'):
                         return (entry['stream_obj_no'], entry['index'])
                     return entry['offset']
                 else:
                     return 0
         return None
-        
+
     @classmethod
     def from_xrefstm(cls, indirectStreamObj):
         streamObj = indirectStreamObj.value
@@ -92,10 +92,10 @@ class PdfXRefSubSection():
 
 
     def __init__(self, f):
-        '''Initialize a PdfXRefSubSection from a opened PDF file f. 
+        '''Initialize a PdfXRefSubSection from a opened PDF file f.
 
-        The file object’s current position should be at the line with two 
-        numbers, object number of the first object in this subsection and the 
+        The file object’s current position should be at the line with two
+        numbers, object number of the first object in this subsection and the
         umber of entries, separated by a space'''
         self.inuse_entry = []
         self.free_entry = []
@@ -113,7 +113,7 @@ class PdfXRefSubSection():
             raise Exception(f"cross-reference subsection at offset {org_pos} has invalid object number or object count")
 
         f.seek(len(eol_marker), io.SEEK_CUR)
-        # Each entry is exactly 20 bytes long, including EOL marker. 
+        # Each entry is exactly 20 bytes long, including EOL marker.
         for i in range(count):
             entry = f.read(20)
             current_obj_no = self.first_objno + i
@@ -139,15 +139,15 @@ class PdfXRefSubSection():
             else:
                 f.seek(org_pos, io.SEEK_SET)
                 raise Exception(f"cross-reference subsection contains an invalid entry at offset {f.tell() - 20}")
-            # last free entry (the tail of the linked list) links back to obj no 0 
+            # last free entry (the tail of the linked list) links back to obj no 0
             if len(self.free_entry) > 0 and self.free_entry[-1]['next_free_obj_no'] != 0:
                 f.seek(org_pos, io.SEEK_SET)
                 raise Exception(f"cross-reference subsection contains an invalid entry at offset {f.tell() - 20}")
-    
 
 
 
-            
+
+
 
 
 

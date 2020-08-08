@@ -29,7 +29,7 @@ def FlateDecode(dataBytes: Union[bytes, bytearray], params: PdfDictionaryObject)
             return up
         else:
             return up_left
-    
+
     data = zlib.decompress(dataBytes)
     predictor = Predictor.NoPrediction
 
@@ -38,7 +38,7 @@ def FlateDecode(dataBytes: Union[bytes, bytearray], params: PdfDictionaryObject)
             predictor = Predictor(params.get('Predictor', Predictor.NoPrediction).value)
         except AttributeError: # get not exist
             pass
-    
+
     if predictor != Predictor.NoPrediction:
         columns = params.get('Columns', PdfNumericObject(Decimal(1)))
         if not isinstance(columns, PdfNumericObject) or columns.value.as_integer_ratio()[1] != 1:

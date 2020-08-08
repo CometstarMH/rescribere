@@ -55,7 +55,7 @@ def peek_at_least(f: io.BufferedReader, size: int):
 
 def read_until(f: io.BufferedReader, patterns: Iterable, *, maxsize: int = 0):
     """until earliest, if tie, longest, one in patterns. Note: f must support seek().
-    
+
     If f produces bytes, patterns should also be bytes literals (string literals with b prefix)"""
     maxsize = 0 if maxsize < 0 else maxsize
     max_len = max(len(p) for p in patterns)
@@ -112,7 +112,7 @@ def seek_until(f: io.BufferedReader, patterns: Iterable, *, ignore_comment: bool
         # _\r => \x00\r, \x20\r, \t\r, \f\r
         # _\n => \x00\n, \x20\n, \t\n, \f\n
         # _\r\n => \x00\r\n, \x20\r\n, \t\r\n, \f\r\n
-        # 
+        #
         return seek_until(f, patterns, ignore_comment=ignore_comment)
     else:
         return f.tell()
@@ -167,19 +167,19 @@ def rlines(f, BLOCK_SIZE = 1024, *, MAX_OFFSET = None):
         block_end_byte -= BLOCK_SIZE
         block_number -= 1
         # this includes the characters after the last EOL
-        all_read_text = b''.join(reversed(blocks)) 
+        all_read_text = b''.join(reversed(blocks))
         # yield all lines except the last line, which may be partial
         temp = re.split(rb'(\r\n|\r(?!\n)|(?<!\r)\n)', all_read_text)
         # re.split always output odd nunber of elements when there is exactly 1 capture group in the delim
         # the last element is the remainder of unsplit text, which can be empty
-        if temp[-1] == b'': temp = temp[:-1] 
+        if temp[-1] == b'': temp = temp[:-1]
         yield from reversed(list(islice((b''.join(x) for x in chunks(temp, 2)), 1, None)))
         # save the remaining characters
         temp = re.split(rb'(\r\n|\r(?!\n)|(?<!\r)\n)', all_read_text, 1) # max len = 3
         blocks = [b''.join(temp[0:2])] if len(temp) > 1 else [temp]
         if len(blocks[-1]) == 0:
             blocks = []
-    if len(blocks) > 0: yield blocks[0] 
+    if len(blocks) > 0: yield blocks[0]
 
 @memoize
 def b_(sth) -> bytes:

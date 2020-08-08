@@ -11,8 +11,8 @@ def decode_objstm(objstmobj, doc):
         raise ValueError('objstmobj is not a PdfIndirectObject containing a PdfStreamObject')
 
     objbytestream = io.BufferedReader(io.BytesIO(streamObj.decode()))
-    # N pairs of integers 
-    # 1st int is obj no of the compressed object 
+    # N pairs of integers
+    # 1st int is obj no of the compressed object
     # 2nd int is byte offset of that object, relative to the first obj
     objbytestream.seek(0, io.SEEK_SET)
     utils.seek_until(objbytestream, syntax.NON_WHITESPACES, ignore_comment=True)
@@ -42,5 +42,5 @@ def decode_objstm(objstmobj, doc):
         objbytestream.seek(First + p[1], io.SEEK_SET)
         result[objstmobj_no,idx] = PdfIndirectObject(PdfObject.create_from_file(objbytestream, doc) , p[0], 0)
         # TODO: check for orphaned bytes between compressed objectes?
-    
+
     return result

@@ -29,7 +29,7 @@ class ProgressBarDialog(Toplevel):
         self.done = False
 
         Toplevel.__init__(self, parent)
-        
+
         self.withdraw() # remain invisible for now
         # If the master is not viewable, don't
         # make the child transient, or else it
@@ -57,7 +57,7 @@ class ProgressBarDialog(Toplevel):
         if self.parent is not None:
             self.geometry("+%d+%d" % (parent.winfo_rootx()+50,
                                       parent.winfo_rooty()+50))
-    
+
     def show(self):
         self.deiconify() # become visible now
 
@@ -67,7 +67,7 @@ class ProgressBarDialog(Toplevel):
         self.wait_visibility()
         self.grab_set()
         self.wait_window(self)
-        
+
     def body(self, master):
         w = Label(master, textvariable=self.status_text, justify=LEFT)
         w.grid(row=0, padx=5, sticky=W)
@@ -76,7 +76,7 @@ class ProgressBarDialog(Toplevel):
         progress.grid(column=0, row=1, sticky=(E, W))
 
         return None
-    
+
     def cancel(self, event=None):
         # put focus back to the parent window
         if self.done:

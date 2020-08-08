@@ -26,7 +26,7 @@ class App(ttk.Frame):
         super().__init__(master, **kwargs)
         self.f = None
         self.pack() # defaults to side = "top"
-        
+
         self.grid(column=0, row=0, sticky=(N, S, E, W))
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=0)
@@ -40,15 +40,18 @@ class App(ttk.Frame):
         self.threevar = BooleanVar()
         self.status_sync_var = SyncVariable()
         self.progress_sync_var = SyncVariable()
+        self.status_sync_var.set('')
+        self.progress_sync_var.set(0)
+
 
         # Initialize widgets
         self.init_widget()
 
-        # Initialize Instance "Variables" 
+        # Initialize Instance "Variables"
         self.onevar.set(True)
         self.twovar.set(False)
         self.threevar.set(True)
-    
+
     def init_widget(self):
         menubar = Menu(self)
         root['menu'] = menubar
@@ -66,16 +69,32 @@ class App(ttk.Frame):
         left_frame.grid(column=0, row=0, sticky=(N, S, E, W))
         left_frame.columnconfigure(0, weight=1)
         left_frame.columnconfigure(1, weight=0)
+        left_frame.columnconfigure(2, weight=1)
+        left_frame.columnconfigure(3, weight=0)
+        left_frame.columnconfigure(4, weight=0)
         left_frame.rowconfigure(0, weight=1)
-        self.tree = ttk.Treeview(left_frame)
-        self.tree.grid(column=0, row=0, sticky=(N, S, E, W))
-        self.tree['columns'] = ('offset', )
-        self.tree.heading('#0', text=' Object', anchor=W)
-        self.tree.column('offset', width=50, minwidth=50)
-        self.tree.heading('offset', text=' Offset', anchor=W)
-        tree_scrollbar = ttk.Scrollbar(left_frame, orient=VERTICAL, command=self.tree.yview)
-        tree_scrollbar.grid(column=1, row=0, sticky=(N,S))
-        self.tree['yscrollcommand'] = tree_scrollbar.set
+
+        self.file_tree = ttk.Treeview(left_frame)
+        self.file_tree.grid(column=0, row=0, sticky=(N, S, E, W))
+        self.file_tree['columns'] = ('offset', )
+        self.file_tree.heading('#0', text=' Object', anchor=W)
+        self.file_tree.column('offset', width=100, minwidth=100, stretch=False)
+        self.file_tree.heading('offset', text=' Offset', anchor=W)
+        file_tree_scrollbar = ttk.Scrollbar(left_frame, orient=VERTICAL, command=self.file_tree.yview)
+        file_tree_scrollbar.grid(column=1, row=0, sticky=(N,S))
+        self.file_tree['yscrollcommand'] = file_tree_scrollbar.set
+
+        self.doc_tree = ttk.Treeview(left_frame)
+        self.doc_tree.grid(column=2, row=0, sticky=(N, S, E, W))
+        self.doc_tree['columns'] = ('page_obj', )
+        self.doc_tree.column('#0', width=50, minwidth=50, stretch=False)
+        self.doc_tree.heading('#0', text=' Page', anchor=W)
+        self.doc_tree.column('page_obj', width=150, minwidth=150)
+        self.doc_tree.heading('page_obj', text=' Page Dict', anchor=W)
+        doc_tree_scrollbar = ttk.Scrollbar(left_frame, orient=VERTICAL, command=self.doc_tree.yview)
+        doc_tree_scrollbar.grid(column=3, row=0, sticky=(N,S))
+        self.doc_tree['yscrollcommand'] = doc_tree_scrollbar.set
+
 
 
         namelbl = ttk.Label(self, text='Name')
@@ -92,12 +111,12 @@ class App(ttk.Frame):
         # name.grid(column=3, row=1, columnspan=2, sticky=(N, E, W), pady=5, padx=5)
         ok.grid(column=1, row=1)
         cancel.grid(column=2, row=1)
-    
+
     def open_file(self):
         filename = filedialog.askopenfilename(filetypes=[('PDF Documents', '*.pdf'), ('All Files', '*.*'), ])
         if filename != '':
             if self.f is not None:
-                try: f.close() 
+                try: f.close()
                 except: pass
             f = open(filename, 'rb')
             x = threading.Thread(target=self.parse_pdf, args=(f,))
@@ -108,20 +127,23 @@ class App(ttk.Frame):
             # blocked until loading_dlg is destroyed
             # so pdfdoc is safe to read
             #print(self.pdfdoc)
-            self.tree.delete(*self.tree.get_children())
+            self.file_tree.delete(*self.file_tree.get_children())
             for offset in self.pdfdoc.offset_obj:
-                self.tree.insert('', 'end', text=repr(self.pdfdoc.offset_obj[offset]), values=(offset, ))
-    
+                self.file_tree.insert('', 'end', text=repr(self.pdfdoc.offset_obj[offset]), values=(offset, ))
+            for i, page_dict in enumerate(self.pdfdoc.get_all_page_dicts()):
+                self.doc_tree.insert('', 'end', text=i, values=(repr(page_dict), ))
+
+
     def close_app(self):
         root.destroy()
 
     def parse_pdf(self, f):
         self.pdfdoc = doc.PdfDocument(f, progress_cb=lambda status, **kwargs: (self.status_sync_var.set(status), self.progress_sync_var.set(kwargs['read'] / kwargs['total'] * 100)))
-    
+
     def poll_wait_parse_pdf(self):
         status = self.status_sync_var.get()
         progress = self.progress_sync_var.get()
-        if self.loading_dlg is not None: 
+        if self.loading_dlg is not None:
             self.loading_dlg.status_text.set(status)
             self.loading_dlg.progress_value.set(progress)
             if status == 'Done':
@@ -130,7 +152,7 @@ class App(ttk.Frame):
                 return
         root.after(50, self.poll_wait_parse_pdf)
 
-    
+
 
 root = Tk()
 root.columnconfigure(0, weight=1)

@@ -25,10 +25,10 @@ class PdfObject(ABC):
     @abstractmethod
     def create_from_file(cls, f: io.BufferedReader, doc):
         char = f.peek(1)[0:1]
-        # TODO: 
+        # TODO:
         if char == b't' or char == b'f':
             return PdfBooleanObject.create_from_file(f)
-        elif char in [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'+', b'-']:
+        elif char in [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'+', b'-', b'.']:
             o = f.tell()
             n = PdfNumericObject.create_from_file(f)
             if n.value < 0 or n.value - int(n.value) != 0: # a decimal or a negative number, never a indirect obj
@@ -80,10 +80,10 @@ class PdfBooleanObject(PdfObject):
             f.write(b'true')
         else:
             f.write(b'false')
-    
+
     def __repr__(self):
         return f'PdfBooleanObject({self.value})'
-    
+
     def __str__(self):
         return str(self.value)
 
@@ -106,10 +106,10 @@ class PdfNumericObject(PdfObject):
 
     def write_to_file(self, f: io.BufferedReader):
         f.write(b_(self.value))
-    
+
     def __repr__(self):
         return f'PdfNumericObject({str(self.value)})'
-    
+
     def __str__(self):
         return str(self.value)
 
@@ -120,24 +120,24 @@ class PdfNumericObject(PdfObject):
         if re.match(br'^[+-]?\d+(?:\.\d*)?|[+-]?\.\d+$', token) is None:
             f.seek(org_pos, io.SEEK_SET)
             raise Exception(f'Parse Error: Not a valid Numeric object at offset {org_pos}.')
-        return PdfNumericObject(Decimal(token.decode('iso-8859-1'))) 
+        return PdfNumericObject(Decimal(token.decode('iso-8859-1')))
 
 class PdfLiteralStringObject(PdfObject):
     """internal value must be a normal Python string"""
     def __init__(self, value):
         if not isinstance(value, str): raise ValueError('internal value must be a normal Python string')
         self.value = value
-    
+
     def __repr__(self):
         return f'PdfLiteralStringObject(\"{self.value}\")'
-    
+
     def __str__(self):
         temp = self.value
         temp = temp.replace('\\', '\\\\')
         temp = temp.replace('(', '\\(')
         temp = temp.replace(')', '\\)')
         return f'({temp})'
-        
+
     def write_to_file(self, f: io.BufferedReader):
         if not isinstance(self.value, str): raise ValueError('internal value must be a normal Python string')
         # https://stackoverflow.com/questions/3411771/best-way-to-replace-multiple-characters-in-a-string
@@ -151,7 +151,7 @@ class PdfLiteralStringObject(PdfObject):
                     text = text.replace(ch, '\\' + oct(code)[2:])
                 else:
                     text.translate(str.maketrans({'\n': '\\n', '\r': '\\r', '\t': '\\t', '\b': '\\b', '\f': '\\f'}))
-    
+
     @classmethod
     def create_from_file(cls, f: io.BufferedReader):
         org_pos = f.tell()
@@ -163,7 +163,7 @@ class PdfLiteralStringObject(PdfObject):
         stack = 1 # 1 for initial (
         while True:
             # Balanced pairs of parentheses within a string require no special treatment.
-            # backslash ( \ ) is used as an escape character for various purposes, 
+            # backslash ( \ ) is used as an escape character for various purposes,
             # such as to include ... unbalanced parentheses ...
             token, endtoken = utils.read_until(f, [b'(', b')', b'\\(', b'\\)'])
             result.extend(token)
@@ -187,7 +187,7 @@ class PdfLiteralStringObject(PdfObject):
             elif endtoken == b'' and stack > 0:
                 f.seek(org_pos, io.SEEK_SET)
                 raise Exception(f'Parse Error: Not a valid string at offset {org_pos}.')
-        
+
         # If a string is too long to be conveniently placed on a single line, it may be split
         # across multiple lines by using the backslash character at the end of a line to
         # indicate that the string continues on the following line. The backslash and the
@@ -219,7 +219,7 @@ class PdfHexStringObject(PdfObject):
     """internal value can be either bytes or bytearray"""
     def __init__(self, value):
         self.value = value
-        
+
     def write_to_file(self, f: io.BufferedReader):
         f.write(b_('<' + self.value.hex().upper() + '>'))
 
@@ -246,9 +246,9 @@ class PdfHexStringObject(PdfObject):
 PdfNameObjectBase = collections.namedtuple('_C_{:.0f}'.format(time.time()), ['value'])
 class PdfNameObject(PdfNameObjectBase, PdfObject):
     """Immutable.
-    
+
     The byte sequence of a name object should be interpreted as a UTF-8 sequence, after expanding # sequences (# followed by 2-digit hex)
-    
+
     This object stores the raw bytes as the primary value, as it is needed for equality checking. The interpreted string can be obtained by calling the get_name() method"""
     __slots__ = []
     def __new__(cls, s):
@@ -264,16 +264,16 @@ class PdfNameObject(PdfNameObjectBase, PdfObject):
         else:
             raise ValueError()
         return PdfNameObjectBase.__new__(cls, b)
-    
+
     def __hash__(self):
         return hash(self.get_name())
 
     def __eq__(self, other):
         return (isinstance(other, PdfNameObject) and other.value == self.value) or ((isinstance(other, bytes) or isinstance(other, bytearray)) and self.value == other) or (isinstance(other, str) and self.get_name() == other)
-    
+
     def __repr__(self):
         return f'PdfNameObject("{self.get_name()}")'
-    
+
     def __str__(self):
         return f'/{self.value.decode("iso-8859-1")}'
 
@@ -283,10 +283,10 @@ class PdfNameObject(PdfNameObjectBase, PdfObject):
         # TODO: char code 0 is not banned here, which is not allowed by spec
         s = re.sub(rb'#([0-9A-Z]{2})', lambda m: bytes(int(m.group(1), 16)), self.value, flags=re.IGNORECASE)
         return s.decode(encoding, 'ignore')
-    
+
     def write_to_file(self, f: io.BufferedReader):
         f.write(b'/' + self.value)
-    
+
     @classmethod
     def create_from_file(cls, f: io.BufferedReader):
         org_pos = f.tell()
@@ -299,13 +299,13 @@ class PdfNameObject(PdfNameObjectBase, PdfObject):
 class PdfArrayObject(PdfObject):
     def __init__(self, value: List[PdfObject]):
         self.value = value
-    
+
     def __repr__(self):
         return f'PdfArrayObject([{" ".join([repr(e) for e in self.value])}])'
-    
+
     def __str__(self):
         return f'[{" ".join([str(e) for e in self.value])}]'
-    
+
     def write_to_file(self, f: io.BufferedReader):
         f.write(b'[')
         for o in self.value:
@@ -328,41 +328,41 @@ class PdfArrayObject(PdfObject):
                     result += [PdfObject.create_from_file(f, doc)]
                 except Exception as ex:
                     raise Exception(f'Parse Error: Not a valid array object at offset {org_pos}.') from ex
-            else: 
+            else:
                 f.read(1)
                 break
         return PdfArrayObject(result)
 
 class PdfDictionaryObject(PdfObject):
     """Specifying the null object as the value of a dictionary entry (Section 3.2.6, “Dictionary Objects”) is equivalent to omitting the entry entirely."""
-    
+
     def __init__(self, value: Dict[PdfNameObject, PdfObject]):
         self.value = value
-    
+
     def __getitem__(self, key):
         if not(isinstance(key, PdfNameObject) or isinstance(key, bytes) or isinstance(key, bytearray) or isinstance(key, str)):
             raise TypeError()
         return self.value[key]
-    
+
     def __setitem__(self, key, value):
         if not(isinstance(key, PdfNameObject) or isinstance(key, bytes) or isinstance(key, bytearray) or isinstance(key, str)):
             raise TypeError()
         if not isinstance(value, PdfObject):
             raise TypeError()
         self.value[PdfNameObject(key)] = value
-    
+
     def get(self, key, default = None):
         return self.value.get(key, default)
-    
+
     def keys(self) -> List[str]:
         return [kn.get_name() for kn in self.value.keys()]
-        
+
     def __repr__(self):
         return f'PdfDictionaryObject({"{" + ", ".join([f"{k}: {repr(self[k])}" for k in self.keys()]) + "}"})'
-    
+
     def __str__(self):
         return f'{"<<" + ", ".join([f"/{k} {str(self[k])}" for k in self.keys()]) + ">>"}'
-    
+
     def write_to_file(self, f: io.BufferedReader):
         f.write(b'<<')
         for k, v in self.value.items():
@@ -371,7 +371,7 @@ class PdfDictionaryObject(PdfObject):
                 f.write(b' ')
             v.write_to_file(f)
         f.write(b'>>')
-        
+
     @classmethod
     def create_from_file(cls, f: io.BufferedReader, doc):
         org_pos = f.tell()
@@ -418,10 +418,10 @@ class PdfIndirectObject(PdfObject):
         self.value.write_to_file(f)
         f.write(b'\n')
         f.write(b'endobj')
-        
+
     def __repr__(self):
         return f'PdfIndirectObject(obj_no={self.obj_no}, gen_no={self.gen_no})'
-    
+
     def __str__(self):
         return f'{self.obj_no} {self.gen_no} obj {str(self.value)} endobj'
 
@@ -473,13 +473,13 @@ class PdfIndirectObject(PdfObject):
                     raise Exception(f'Parse Error: Not a valid indirect object at offset {org_pos}.')
                 inner_obj = streamObj
                 #if streamObj.dict.get('Type') == 'ObjStm': # Object Stream, decode and parse the content
-                        
+
             else:
                 f.seek(org_pos, io.SEEK_SET)
                 raise Exception(f'Parse Error: Not a valid indirect object at offset {org_pos}.')
         else:
             f.seek(6, io.SEEK_CUR)
-        
+
         return PdfIndirectObject(inner_obj, obj_no, gen_no)
 
 class PdfStreamObject(PdfObject):
@@ -487,16 +487,16 @@ class PdfStreamObject(PdfObject):
         self.dict = stream_dict
         self.raw_stream = raw_stream
         self.decoded_stream = None
-    
+
     def decode(self) -> bytes:
         import decode
         if self.decoded_stream is not None:
             return self.decoded_stream
-        
+
         if self.dict.get('Filter') is None:
             self.decoded_stream = self.raw_stream
             return self.decoded_stream
-        
+
         # /Filter array is just like matrix multiplication to ENCODE
         # 1st filter is the last to be applied, and therefore 1st to be used for DECODE
         # TODO: Remove the assumption that Filter value is always a direct obj
@@ -512,23 +512,23 @@ class PdfStreamObject(PdfObject):
             filters_params = [filters_params]
         if isinstance(filters_params, PdfArrayObject):
             filters_params = filters_params.values
-        
+
         self.decoded_stream = self.raw_stream
         for i, filt in enumerate(filters): # filters is now list of PdfNameObject
             decoder = getattr(decode, filt.get_name(), None)
             if decoder is None:
                 raise Exception(f'Unrecognized decoder {filt.get_name()}')
             self.decoded_stream = decoder(self.decoded_stream, filters_params[i] if filters_params else None)
-        
+
         return self.decoded_stream
-    
+
     def write_to_file(self, f: io.BufferedReader):
         pass
 
     @classmethod
     def create_from_file(cls, f: io.BufferedReader, doc):
         org_pos = f.tell()
-        
+
         stream_dict = PdfObject.create_from_file(f, doc)
         utils.seek_until(f, syntax.NON_WHITESPACES, ignore_comment=True)
 
@@ -544,7 +544,7 @@ class PdfStreamObject(PdfObject):
             raise Exception(f'Parse Error: Not a valid stream object at offset {org_pos}.')
         if stream_dict.get('Length') is None or not isinstance(stream_dict.get('Length'), PdfNumericObject):
             raise Exception(f'Parse Error: Not a valid stream object at offset {org_pos}.')
-        
+
         # TODO: Remove the assumption that Length value is always a direct obj
         size = stream_dict['Length'].value
         if size.as_integer_ratio()[0] <= 0 or size.as_integer_ratio()[1] != 1:
@@ -563,18 +563,18 @@ class PdfStreamObject(PdfObject):
             # /Filter (or first element of the array) must specify a Name
             if not isinstance(filt, PdfNameObject):
                 raise Exception(f'Parse Error: Not a valid stream object at offset {org_pos}.')
-            
+
         # read only /Length bytes
         # filter implementation is reponsible for checking if the data length is correct
         # e.g. if any needed end-of-data marker is present at only the end
         raw = f.read(size)
-        
+
 
         # check if stream ends with b'endstream', optionally preceeded by b'\r', 'b'\n' or b'\r\n'
         if utils.peek_at_least(f, 2)[0:2] == b'\r\n':
             f.seek(2, io.SEEK_CUR)
         elif utils.peek_at_least(f, 1)[0:1] == b'\r' or utils.peek_at_least(f, 1)[0:1] == b'\n':
-            f.seek(1, io.SEEK_CUR)    
+            f.seek(1, io.SEEK_CUR)
         token, _ = utils.read_until(f, syntax.DELIMS + syntax.WHITESPACES)
         if token != b'endstream':
             raise Exception(f'Parse Error: Not a valid stream object at offset {org_pos}.')
@@ -589,23 +589,26 @@ class PdfReferenceObject(PdfObject):
         self.doc = doc
         self.obj_no = obj_no
         self.gen_no = gen_no
-    
+
     @property
     def value(self):
         return self.doc.get_obj(self.obj_no, self.gen_no)
-    
+
+    def deref(self):
+        return self.value.value # Ref -> Indirect -> actual obj
+
     def __repr__(self):
         return f'PdfReferenceObject(obj_no={self.obj_no}, gen_no={self.gen_no})'
-    
+
     def __str__(self):
         return f'{self.obj_no} {self.gen_no} R'
 
-        
+
     def write_to_file(self, f: io.BufferedReader):
-        # TODO: 
+        # TODO:
         pass
 
-    
+
     @classmethod
     def create_from_file(cls, f: io.BufferedReader, doc):
         org_pos = f.tell()
@@ -629,19 +632,19 @@ class PdfReferenceObject(PdfObject):
 
 class PdfNullObject(PdfObject):
     """The null object has a type and value that are unequal to those of any other object. There is only one object of type null, denoted by the keyword null."""
-    
+
     def write_to_file(self, f: io.BufferedReader):
         f.write(b'null')
-    
+
     def __eq__(self, other):
         return False
-    
+
     def __repr__(self):
         return 'PdfNullObject()'
-    
+
     def __str__(self):
         return 'null'
-    
+
     @classmethod
     def create_from_file(cls, f: io.BufferedReader):
         org_pos = f.tell()
@@ -656,13 +659,13 @@ def val(pdfObj: PdfObject):
     if isinstance(pdfObj, PdfBooleanObject) or isinstance(pdfObj, PdfNumericObject) or isinstance(pdfObj, PdfLiteralStringObject)or isinstance(pdfObj, PdfHexStringObject):
         return pdfObj.value
     if isinstance(pdfObj, PdfNameObject):
-        return pdfObj # TODO: reconsider?
+        return pdfObj
     if isinstance(pdfObj, PdfArrayObject):
         return [val(obj) for obj in pdfObj.value]
     if isinstance(pdfObj, PdfDictionaryObject):
         return {k: val(pdfObj.value[k]) for k in pdfObj.value} # dict keys must be PdfNameObject
     if isinstance(pdfObj, PdfIndirectObject):
-        return val(pdfObj.value) # TODO: reconsider?
+        return val(pdfObj.value)
     if isinstance(pdfObj, PdfStreamObject):
         return pdfObj.decode()
     if isinstance(pdfObj, PdfReferenceObject):
