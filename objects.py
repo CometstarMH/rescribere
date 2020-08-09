@@ -542,11 +542,15 @@ class PdfStreamObject(PdfObject):
         if not isinstance(stream_dict, PdfDictionaryObject):
             f.seek(org_pos, io.SEEK_SET)
             raise Exception(f'Parse Error: Not a valid stream object at offset {org_pos}.')
-        if stream_dict.get('Length') is None or not isinstance(stream_dict.get('Length'), PdfNumericObject):
+        if stream_dict.get('Length') is None:
             raise Exception(f'Parse Error: Not a valid stream object at offset {org_pos}.')
 
-        # TODO: Remove the assumption that Length value is always a direct obj
-        size = stream_dict['Length'].value
+        if isinstance(stream_dict['Length'], PdfReferenceObject):
+            size = stream_dict['Length'].deref().value
+        elif isinstance(stream_dict['Length'], PdfNumericObject):
+            size = stream_dict['Length'].value
+        else:
+            raise Exception(f'Parse Error: Not a valid stream object at offset {org_pos}.')
         if size.as_integer_ratio()[0] <= 0 or size.as_integer_ratio()[1] != 1:
             raise Exception(f'Parse Error: Not a valid stream object at offset {org_pos}.')
         size = size.as_integer_ratio()[0]

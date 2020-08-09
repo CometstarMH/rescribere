@@ -45,72 +45,22 @@ class PdfDocument:
             xref_section = self.increments[increment]['xref_section']
 
             offset = xref_section.get_obj_offset(obj_num, gen_num)
-            if isinstance(offset, tuple):
-                return self.compressed_obj[offset]
-            if offset > 0:
-                return self.offset_obj[offset]
-            elif offset == 0:
-                # offset = 0 <=> obj_num is free at gen_num
-                return None
-            else:
+            if offset is None:
                 # offset is None <=> obj_num not found
                 continue
-                # trailer_dict = get_trailer_dict(increment)
-                # startxref = trailer_dict.get('Prev')
-                # # TODO: assuming Prev has direct object value
-                # if startxref is not None and isinstance(startxref, PdfNumericObject):
-                #     # TODO: converting from decimal directly to int
-                #     startxref = int(startxref.value)
-                # else:
-                #     break
-                # if startxref < 0:
-                #     break
-
-        raise Exception('Object not found')
-
-
-        if not startxref_found or startxref < 0:
-            raise Exception('No valid startxref is found')
-        while True:
-            if startxref == 0:
-                # TODO: dummy startxref?
-                return None
-            # check if the xref is either in raw/has been uncompressed
-            if startxref not in self.offset_xref:
-                try:
-                    isXRefStm = self.offset_obj[startxref].value.dict['Type'] == 'XRef'
-                    if not isXRefStm:
-                        raise Exception('')
-                except Exception as ex:
-                    raise Exception('startxref refers to an object, but it is not a XRef stream') from ex
-                # XRef streams are stream objects, which is indirect
-                xrefstm: PdfStreamObject = self.offset_obj[startxref]
-                section = PdfXRefSection.from_xrefstm(xrefstm)
-                # Cache the decoded xrefstm
-                self.offset_xref[self.increments[increment]['startxref']] = section
-            else:
-                section = self.offset_xref[startxref]
-
-            offset = section.get_obj_offset(obj_num, gen_num)
-            if isinstance(offset, tuple):
+            elif isinstance(offset, tuple):
+                # TODO: handle the case where obj is not already cached
                 return self.compressed_obj[offset]
-            if offset > 0:
+            elif offset > 0:
+                if self.offset_obj.get(offset) is None:
+                    temp_f = open(self.__f.name, 'rb')
+                    temp_f.seek(offset, io.SEEK_SET)
+                    self.offset_obj[offset] = PdfObject.create_from_file(temp_f, self)
                 return self.offset_obj[offset]
             elif offset == 0:
                 # offset = 0 <=> obj_num is free at gen_num
                 return None
-            else:
-                # offset is None <=> obj_num not found
-                trailer_dict = get_trailer_dict(increment)
-                startxref = trailer_dict.get('Prev')
-                # TODO: assuming Prev has direct object value
-                if startxref is not None and isinstance(startxref, PdfNumericObject):
-                    # TODO: converting from decimal directly to int
-                    startxref = int(startxref.value)
-                else:
-                    break
-                if startxref < 0:
-                    break
+
         raise Exception('Object not found')
 
     def get_trailer_dict(self, increment=-1):
@@ -195,7 +145,7 @@ class PdfDocument:
         self.offset_xref = {}
         self.ready = False
         self.offset_xref_trailer = {} # [offset]: (PdfXRefSection, trailer_dict)
-
+        self.__f = f
         self.parse_normal(f, progress_cb)
 
     def get_xref_trailer_at_offset(self, f, offset):
@@ -291,6 +241,7 @@ class PdfDocument:
             xref_offset = int(trailer['Prev'].value) # must not be indirect
             self.increments = [{ 'body': [], 'xref_section': None, 'trailer': None, 'startxref': None, 'eof': False }] + self.increments
             self.increments[0]['startxref'] = xref_offset
+        self.ready = True
 
         inuse_parsed_count = 0
         # parse each in use obj num
@@ -323,10 +274,6 @@ class PdfDocument:
         if progress_cb is not None: progress_cb('100% processed', read=inuse_parsed_count, total=inuse_count)
         print('Done')
         if progress_cb is not None: progress_cb('Done', read=inuse_parsed_count, total=inuse_count)
-        self.ready = True
-
-
-
 
     def parse_linear(self, f, progress_cb=None):
         '''Initialize a PdfDocument from a opened PDF file f from the beginning'''

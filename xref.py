@@ -33,6 +33,8 @@ class PdfXRefSection():
             sub_length = len(sub.entries)
             if obj_num > sub.first_objno + sub_length - 1:
                 continue
+            elif sub.first_objno > obj_num:
+                continue
             else:
                 entry = sub.entries[obj_num - sub.first_objno]
                 if entry['used']:
